@@ -1,0 +1,40 @@
+name: Sync upstream (manual)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM: openclaw/openclaw
+  DEFAULT_BRANCH: main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config checkout.defaultRemote origin
+
+      - name: Add upstream remote
+        run: |
+          if ! git remote get-url upstream >/dev/null 2>&1; then
+            git remote add upstream "https://github.com/${UPSTREAM}.git"
+          fi
+
+      - name: Sync default branch
+        run: |
+          git fetch upstream
+          git switch "${DEFAULT_BRANCH}"
+          git merge --ff-only "upstream/${DEFAULT_BRANCH}"
+          git push origin "${DEFAULT_BRANCH}"
