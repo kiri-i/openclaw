@@ -105,6 +105,7 @@
 
 ## Troubleshooting
 - Rebrand/migration issues or legacy config/service warnings: run `openclaw doctor` (see `docs/gateway/doctor.md`).
+- Config pitfalls: `agents.defaults.subagents.allowlist` is not a valid key; it breaks startup. Use only `subagents.{maxConcurrent,archiveAfterMinutes,model}` under `agents.defaults`.
 
 ## Agent-Specific Notes
 - Vocabulary: "makeup" = "mac app".
