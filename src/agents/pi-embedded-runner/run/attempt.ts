@@ -615,6 +615,54 @@ export async function runEmbeddedAttempt(
         });
       };
 
+      let abortWarnTimer: NodeJS.Timeout | undefined;
+      const isProbeSession = params.sessionId?.startsWith("probe-") ?? false;
+      let abortTimer: NodeJS.Timeout | undefined;
+      const startAbortTimer = () => {
+        abortTimer = setTimeout(
+          () => {
+            if (!isProbeSession) {
+              log.warn(
+                `embedded run timeout: runId=${params.runId} sessionId=${params.sessionId} timeoutMs=${params.timeoutMs}`,
+              );
+            }
+            abortRun(true);
+            if (!abortWarnTimer) {
+              abortWarnTimer = setTimeout(() => {
+                if (!activeSession.isStreaming) {
+                  return;
+                }
+                if (!isProbeSession) {
+                  log.warn(
+                    `embedded run abort still streaming: runId=${params.runId} sessionId=${params.sessionId}`,
+                  );
+                }
+              }, 10_000);
+            }
+          },
+          Math.max(1, params.timeoutMs),
+        );
+      };
+      const refreshAbortTimer = () => {
+        if (!abortTimer) {
+          startAbortTimer();
+          return;
+        }
+        clearTimeout(abortTimer);
+        startAbortTimer();
+      };
+      const noteActivity = () => {
+        if (aborted || timedOut) {
+          return;
+        }
+        refreshAbortTimer();
+      };
+      const wrapAsync =
+        <T extends unknown[]>(fn?: (...args: T) => Promise<void> | void) =>
+        async (...args: T) => {
+          noteActivity();
+          await fn?.(...args);
+        };
       const subscription = subscribeEmbeddedPiSession({
         session: activeSession,
         runId: params.runId,
@@ -623,15 +671,15 @@ export async function runEmbeddedAttempt(
         toolResultFormat: params.toolResultFormat,
         shouldEmitToolResult: params.shouldEmitToolResult,
         shouldEmitToolOutput: params.shouldEmitToolOutput,
-        onToolResult: params.onToolResult,
-        onReasoningStream: params.onReasoningStream,
-        onBlockReply: params.onBlockReply,
+        onToolResult: wrapAsync(params.onToolResult),
+        onReasoningStream: wrapAsync(params.onReasoningStream),
+        onBlockReply: wrapAsync(params.onBlockReply),
         onBlockReplyFlush: params.onBlockReplyFlush,
         blockReplyBreak: params.blockReplyBreak,
         blockReplyChunking: params.blockReplyChunking,
-        onPartialReply: params.onPartialReply,
-        onAssistantMessageStart: params.onAssistantMessageStart,
-        onAgentEvent: params.onAgentEvent,
+        onPartialReply: wrapAsync(params.onPartialReply),
+        onAssistantMessageStart: wrapAsync(params.onAssistantMessageStart),
+        onAgentEvent: wrapAsync(params.onAgentEvent),
         enforceFinalTag: params.enforceFinalTag,
       });
 
@@ -656,31 +704,7 @@ export async function runEmbeddedAttempt(
       };
       setActiveEmbeddedRun(params.sessionId, queueHandle);
 
-      let abortWarnTimer: NodeJS.Timeout | undefined;
-      const isProbeSession = params.sessionId?.startsWith("probe-") ?? false;
-      const abortTimer = setTimeout(
-        () => {
-          if (!isProbeSession) {
-            log.warn(
-              `embedded run timeout: runId=${params.runId} sessionId=${params.sessionId} timeoutMs=${params.timeoutMs}`,
-            );
-          }
-          abortRun(true);
-          if (!abortWarnTimer) {
-            abortWarnTimer = setTimeout(() => {
-              if (!activeSession.isStreaming) {
-                return;
-              }
-              if (!isProbeSession) {
-                log.warn(
-                  `embedded run abort still streaming: runId=${params.runId} sessionId=${params.sessionId}`,
-                );
-              }
-            }, 10_000);
-          }
-        },
-        Math.max(1, params.timeoutMs),
-      );
+      startAbortTimer();
 
       let messagesSnapshot: AgentMessage[] = [];
       let sessionIdUsed = activeSession.sessionId;
