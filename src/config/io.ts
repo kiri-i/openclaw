@@ -61,6 +61,11 @@ const CONFIG_BACKUP_COUNT = 5;
 const loggedInvalidConfigs = new Set<string>();
 
 export type ParseConfigJson5Result = { ok: true; parsed: unknown } | { ok: false; error: string };
+export type ConfigBackupRestoreResult = {
+  restored: boolean;
+  restoredFrom?: string;
+  invalidConfigPath?: string | null;
+};
 
 function hashConfigRaw(raw: string | null): string {
   return crypto
@@ -92,6 +97,20 @@ function coerceConfig(value: unknown): OpenClawConfig {
   return value as OpenClawConfig;
 }
 
+export function resolveConfigBackupPaths(
+  configPath: string,
+  maxCount = CONFIG_BACKUP_COUNT,
+): string[] {
+  if (maxCount <= 0) {
+    return [];
+  }
+  const paths: string[] = [`${configPath}.bak`];
+  for (let index = 1; index < maxCount; index += 1) {
+    paths.push(`${configPath}.bak.${index}`);
+  }
+  return paths;
+}
+
 async function rotateConfigBackups(configPath: string, ioFs: typeof fs.promises): Promise<void> {
   if (CONFIG_BACKUP_COUNT <= 1) {
     return;
@@ -109,6 +128,45 @@ async function rotateConfigBackups(configPath: string, ioFs: typeof fs.promises)
   await ioFs.rename(backupBase, `${backupBase}.1`).catch(() => {
     // best-effort
   });
+}
+
+export async function restoreLatestValidConfigBackup(
+  overrides: ConfigIoDeps = {},
+  opts: { preserveInvalid?: boolean; maxDepth?: number } = {},
+): Promise<ConfigBackupRestoreResult> {
+  const io = createConfigIO(overrides);
+  const ioFs = overrides.fs ?? fs;
+  const preserveInvalid = opts.preserveInvalid !== false;
+  const maxDepth = opts.maxDepth ?? 1;
+  const backupPaths = resolveConfigBackupPaths(io.configPath, maxDepth);
+  for (const backupPath of backupPaths) {
+    if (!ioFs.existsSync(backupPath)) {
+      continue;
+    }
+    const backupIo = createConfigIO({ ...overrides, configPath: backupPath });
+    const snapshot = await backupIo.readConfigFileSnapshot();
+    if (!snapshot.exists || !snapshot.valid) {
+      continue;
+    }
+    let invalidConfigPath: string | null = null;
+    if (preserveInvalid && ioFs.existsSync(io.configPath)) {
+      invalidConfigPath = `${io.configPath}.invalid.${Date.now()}`;
+      await ioFs.promises.rename(io.configPath, invalidConfigPath).catch(() => {
+        invalidConfigPath = null;
+      });
+    }
+    await ioFs.promises.mkdir(path.dirname(io.configPath), { recursive: true, mode: 0o700 });
+    await ioFs.promises.copyFile(backupPath, io.configPath);
+    await ioFs.promises.chmod(io.configPath, 0o600).catch(() => {
+      // best-effort
+    });
+    return {
+      restored: true,
+      restoredFrom: backupPath,
+      invalidConfigPath,
+    };
+  }
+  return { restored: false };
 }
 
 export type ConfigIoDeps = {

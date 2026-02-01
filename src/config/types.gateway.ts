@@ -120,6 +120,14 @@ export type GatewayReloadConfig = {
   debounceMs?: number;
 };
 
+export type GatewayRecoveryConfig = {
+  /**
+   * Auto-rollback to the most recent valid config backup if startup validation fails.
+   * Default: true.
+   */
+  rollbackInvalidConfig?: boolean;
+};
+
 export type GatewayHttpChatCompletionsConfig = {
   /**
    * If false, the Gateway will not serve `POST /v1/chat/completions`.
@@ -232,6 +240,7 @@ export type GatewayConfig = {
   tailscale?: GatewayTailscaleConfig;
   remote?: GatewayRemoteConfig;
   reload?: GatewayReloadConfig;
+  recovery?: GatewayRecoveryConfig;
   tls?: GatewayTlsConfig;
   http?: GatewayHttpConfig;
   nodes?: GatewayNodesConfig;

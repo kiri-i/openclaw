@@ -11,6 +11,7 @@ import {
   loadConfig,
   migrateLegacyConfig,
   readConfigFileSnapshot,
+  restoreLatestValidConfigBackup,
   writeConfigFile,
 } from "../config/config.js";
 import { isDiagnosticsEnabled } from "../infra/diagnostic-events.js";
@@ -28,9 +29,11 @@ import {
 } from "../infra/skills-remote.js";
 import { scheduleGatewayUpdateCheck } from "../infra/update-startup.js";
 import { setGatewaySigusr1RestartPolicy } from "../infra/restart.js";
+import { writeRestartSentinel } from "../infra/restart-sentinel.js";
 import { startDiagnosticHeartbeat, stopDiagnosticHeartbeat } from "../logging/diagnostic.js";
 import { createSubsystemLogger, runtimeForLogger } from "../logging/subsystem.js";
 import type { PluginServicesHandle } from "../plugins/services.js";
+import type { ConfigFileSnapshot } from "../config/config.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { runOnboardingWizard } from "../wizard/onboarding.js";
 import { startGatewayConfigReloader } from "./config-reload.js";
@@ -70,6 +73,7 @@ import { startGatewayTailscaleExposure } from "./server-tailscale.js";
 import { loadGatewayTlsRuntime } from "./server/tls.js";
 import { createWizardSessionTracker } from "./server-wizard-sessions.js";
 import { attachGatewayWsHandlers } from "./server-ws-runtime.js";
+import { parseBooleanValue } from "../utils/boolean.js";
 
 export { __resetModelCatalogCacheForTest } from "./server-model-catalog.js";
 
@@ -88,6 +92,16 @@ const logHooks = log.child("hooks");
 const logPlugins = log.child("plugins");
 const logWsControl = log.child("ws");
 const canvasRuntime = runtimeForLogger(logCanvas);
+
+function shouldRollbackInvalidConfig(snapshot: ConfigFileSnapshot): boolean {
+  const envOverride = parseBooleanValue(
+    process.env.OPENCLAW_GATEWAY_RECOVERY_ROLLBACK_INVALID_CONFIG,
+  );
+  if (envOverride !== undefined) {
+    return envOverride;
+  }
+  return snapshot.config.gateway?.recovery?.rollbackInvalidConfig !== false;
+}
 
 export type GatewayServer = {
   close: (opts?: { reason?: string; restartExpectedMs?: number | null }) => Promise<void>;
@@ -183,6 +197,29 @@ export async function startGatewayServer(
   }
 
   configSnapshot = await readConfigFileSnapshot();
+  if (
+    configSnapshot.exists &&
+    !configSnapshot.valid &&
+    shouldRollbackInvalidConfig(configSnapshot)
+  ) {
+    const rollback = await restoreLatestValidConfigBackup(
+      { configPath: configSnapshot.path },
+      { preserveInvalid: true, maxDepth: 1 },
+    );
+    if (rollback.restored) {
+      log.warn(`gateway: restored config from backup: ${rollback.restoredFrom}`);
+      if (rollback.invalidConfigPath) {
+        log.warn(`gateway: preserved invalid config at ${rollback.invalidConfigPath}`);
+      }
+      await writeRestartSentinel({
+        kind: "restart",
+        status: "ok",
+        ts: Date.now(),
+        message: `Recovered from invalid config by restoring ${rollback.restoredFrom}. Invalid config saved to ${rollback.invalidConfigPath ?? "unknown"}.`,
+      }).catch(() => {});
+      configSnapshot = await readConfigFileSnapshot();
+    }
+  }
   if (configSnapshot.exists && !configSnapshot.valid) {
     const issues =
       configSnapshot.issues.length > 0

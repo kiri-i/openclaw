@@ -366,6 +366,12 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
+        recovery: z
+          .object({
+            rollbackInvalidConfig: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
         tls: z
           .object({
             enabled: z.boolean().optional(),

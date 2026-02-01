@@ -205,6 +205,7 @@ const FIELD_LABELS: Record<string, string> = {
   "gateway.http.endpoints.chatCompletions.enabled": "OpenAI Chat Completions Endpoint",
   "gateway.reload.mode": "Config Reload Mode",
   "gateway.reload.debounceMs": "Config Reload Debounce (ms)",
+  "gateway.recovery.rollbackInvalidConfig": "Gateway Config Auto-Rollback",
   "gateway.nodes.browser.mode": "Gateway Node Browser Mode",
   "gateway.nodes.browser.node": "Gateway Node Browser Pin",
   "gateway.nodes.allowCommands": "Gateway Node Allowlist (Extra Commands)",
@@ -392,6 +393,8 @@ const FIELD_HELP: Record<string, string> = {
     "Enable the OpenAI-compatible `POST /v1/chat/completions` endpoint (default: false).",
   "gateway.reload.mode": 'Hot reload strategy for config changes ("hybrid" recommended).',
   "gateway.reload.debounceMs": "Debounce window (ms) before applying config changes.",
+  "gateway.recovery.rollbackInvalidConfig":
+    "Auto-rollback to the previous config backup if startup validation fails (default: true).",
   "gateway.nodes.browser.mode":
     'Node browser routing ("auto" = pick single connected browser node, "manual" = require node param, "off" = disable).',
   "gateway.nodes.browser.node": "Pin browser routing to a specific node id or name (optional).",
