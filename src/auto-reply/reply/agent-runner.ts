@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
+import { describeFailoverError } from "../../agents/failover-error.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import { queueEmbeddedPiMessage } from "../../agents/pi-embedded.js";
@@ -35,6 +36,7 @@ import { createAudioAsVoiceBuffer, createBlockReplyPipeline } from "./block-repl
 import { resolveBlockStreamingCoalescing } from "./block-streaming.js";
 import { createFollowupRunner } from "./followup-runner.js";
 import { enqueueFollowupRun, type FollowupRun, type QueueSettings } from "./queue.js";
+import { routeReply } from "./route-reply.js";
 import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
 import { persistSessionUsageUpdate } from "./session-usage.js";
 import { incrementCompactionCount } from "./session-updates.js";
@@ -306,29 +308,53 @@ export async function runReplyAgent(params: {
     });
   try {
     const runStartedAt = Date.now();
-    const runOutcome = await runAgentTurnWithFallback({
-      commandBody,
-      followupRun,
-      sessionCtx,
-      opts,
-      typingSignals,
-      blockReplyPipeline,
-      blockStreamingEnabled,
-      blockReplyChunking,
-      resolvedBlockStreamingBreak,
-      applyReplyToMode,
-      shouldEmitToolResult,
-      shouldEmitToolOutput,
-      pendingToolTasks,
-      resetSessionAfterCompactionFailure,
-      resetSessionAfterRoleOrderingConflict,
-      isHeartbeat,
-      sessionKey,
-      getActiveSessionEntry: () => activeSessionEntry,
-      activeSessionStore,
-      storePath,
-      resolvedVerboseLevel,
-    });
+    let runOutcome;
+    try {
+      runOutcome = await runAgentTurnWithFallback({
+        commandBody,
+        followupRun,
+        sessionCtx,
+        opts,
+        typingSignals,
+        blockReplyPipeline,
+        blockStreamingEnabled,
+        blockReplyChunking,
+        resolvedBlockStreamingBreak,
+        applyReplyToMode,
+        shouldEmitToolResult,
+        shouldEmitToolOutput,
+        pendingToolTasks,
+        resetSessionAfterCompactionFailure,
+        resetSessionAfterRoleOrderingConflict,
+        isHeartbeat,
+        sessionKey,
+        getActiveSessionEntry: () => activeSessionEntry,
+        activeSessionStore,
+        storePath,
+        resolvedVerboseLevel,
+      });
+    } catch (err) {
+      if (!isHeartbeat && replyToChannel) {
+        const to = sessionCtx.OriginatingTo ?? sessionCtx.To;
+        if (to) {
+          const reason = describeFailoverError(err).reason;
+          const text =
+            reason === "timeout"
+              ? "タイムアウトしました。もう一度送ってください。"
+              : "エラーが発生しました。もう一度送ってください。";
+          await routeReply({
+            payload: { text },
+            channel: replyToChannel,
+            to,
+            sessionKey,
+            accountId: sessionCtx.AccountId,
+            threadId: sessionCtx.MessageThreadId,
+            cfg,
+          });
+        }
+      }
+      throw err;
+    }
 
     if (runOutcome.kind === "final") {
       return finalizeWithFollowup(runOutcome.payload, queueKey, runFollowupTurn);
@@ -382,6 +408,29 @@ export async function runReplyAgent(params: {
       lookupContextTokens(modelUsed) ??
       activeSessionEntry?.contextTokens ??
       DEFAULT_CONTEXT_TOKENS;
+
+    if (!isHeartbeat && replyToChannel) {
+      const to = sessionCtx.OriginatingTo ?? sessionCtx.To;
+      const requestedProvider = followupRun.run.provider;
+      const requestedModel = followupRun.run.model;
+      if (to && (requestedProvider !== providerUsed || requestedModel !== modelUsed)) {
+        const noticeLabel =
+          fallbackProvider !== requestedProvider || fallbackModel !== requestedModel
+            ? "フォールバック"
+            : "モデル変更";
+        await routeReply({
+          payload: {
+            text: `⚠️ ${noticeLabel}: ${requestedProvider}/${requestedModel} → ${providerUsed}/${modelUsed}`,
+          },
+          channel: replyToChannel,
+          to,
+          sessionKey,
+          accountId: sessionCtx.AccountId,
+          threadId: sessionCtx.MessageThreadId,
+          cfg,
+        });
+      }
+    }
 
     await persistSessionUsageUpdate({
       storePath,
