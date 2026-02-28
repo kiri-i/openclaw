@@ -60,5 +60,5 @@ jobs:
           git fetch upstream "${DEFAULT_BRANCH}" --prune
           git switch "${DEFAULT_BRANCH}"
           git merge --no-edit "upstream/${DEFAULT_BRANCH}"
-          git remote add origin-auth "https://x-access-token:${PUBLIC_FORK_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote add origin-auth "https://${PUBLIC_FORK_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin-auth "${DEFAULT_BRANCH}"
