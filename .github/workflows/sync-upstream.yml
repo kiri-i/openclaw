@@ -9,7 +9,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  workflows: write
 
 env:
   UPSTREAM_REPO: openclaw/openclaw
@@ -50,7 +49,19 @@ jobs:
             git remote add public "https://github.com/${PUBLIC_REPO}.git"
           fi
 
+      - name: Verify private sync token
+        env:
+          PRIVATE_SYNC_TOKEN: ${{ secrets.PRIVATE_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PRIVATE_SYNC_TOKEN}" ]; then
+            echo "::error::Missing secret PRIVATE_SYNC_TOKEN (repo/workflow write on ${GITHUB_REPOSITORY})"
+            exit 1
+          fi
+
       - name: Sync private mirror branch with upstream
+        env:
+          PRIVATE_SYNC_TOKEN: ${{ secrets.PRIVATE_SYNC_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -64,7 +75,8 @@ jobs:
 
           if [ "${ORIGIN_MAIN_SHA}" != "${UPSTREAM_MAIN_SHA}" ]; then
             git checkout -B "${PRIVATE_BASE_BRANCH}" "upstream/${PRIVATE_BASE_BRANCH}"
-            git push --force-with-lease origin "${PRIVATE_BASE_BRANCH}:${PRIVATE_BASE_BRANCH}"
+            git remote add origin-auth "https://x-access-token:${PRIVATE_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git push --force-with-lease origin-auth "${PRIVATE_BASE_BRANCH}:${PRIVATE_BASE_BRANCH}"
           else
             echo "Private mirror branch is already in sync"
           fi
