@@ -66,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          git remote set-url origin "https://x-access-token:${PRIVATE_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "https://${PRIVATE_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git fetch upstream "${PRIVATE_BASE_BRANCH}" --prune
           git fetch origin "${PRIVATE_BASE_BRANCH}" --prune
 
@@ -77,7 +77,7 @@ jobs:
 
           if [ "${ORIGIN_MAIN_SHA}" != "${UPSTREAM_MAIN_SHA}" ]; then
             git checkout -B "${PRIVATE_BASE_BRANCH}" "upstream/${PRIVATE_BASE_BRANCH}"
-            git remote add origin-auth "https://x-access-token:${PRIVATE_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git remote add origin-auth "https://${PRIVATE_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             git push --force-with-lease="${PRIVATE_BASE_BRANCH}:${ORIGIN_MAIN_SHA}" origin-auth "${PRIVATE_BASE_BRANCH}:${PRIVATE_BASE_BRANCH}"
           else
             echo "Private mirror branch is already in sync"
@@ -115,7 +115,7 @@ jobs:
           PUBLIC_SYNC_TOKEN: ${{ secrets.PUBLIC_SYNC_TOKEN }}
         run: |
           set -euo pipefail
-          git remote add public-auth "https://x-access-token:${PUBLIC_SYNC_TOKEN}@github.com/${PUBLIC_REPO}.git"
+          git remote add public-auth "https://${PUBLIC_SYNC_TOKEN}@github.com/${PUBLIC_REPO}.git"
           git checkout -B "${PUBLIC_PR_BRANCH}" "origin/${PRIVATE_WORK_BRANCH}"
           git push --force public-auth "${PUBLIC_PR_BRANCH}:${PUBLIC_PR_BRANCH}"
 
