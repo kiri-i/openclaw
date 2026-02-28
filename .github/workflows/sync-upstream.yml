@@ -1,20 +1,33 @@
-name: Sync upstream (manual)
+name: Sync upstream + prepare public PR
 
 on:
+  schedule:
+    # Daily at 03:45 UTC
+    - cron: "45 3 * * *"
   workflow_dispatch: {}
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
-  UPSTREAM: openclaw/openclaw
-  DEFAULT_BRANCH: main
+  UPSTREAM_REPO: openclaw/openclaw
+  PUBLIC_REPO: kiri-i/openclaw
+  PRIVATE_BASE_BRANCH: main
+  PRIVATE_WORK_BRANCH: work/main
+  PUBLIC_BASE_BRANCH: main
+  PUBLIC_PR_BRANCH: sync/private-work-main
+
+concurrency:
+  group: private-sync-and-pr-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  sync:
+  sync_and_prepare_pr:
+    if: github.repository == 'kiri-i/openclaw-private'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout fork
+      - name: Checkout private repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -26,15 +39,95 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config checkout.defaultRemote origin
 
-      - name: Add upstream remote
+      - name: Ensure remotes
         run: |
+          set -euo pipefail
           if ! git remote get-url upstream >/dev/null 2>&1; then
-            git remote add upstream "https://github.com/${UPSTREAM}.git"
+            git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          fi
+          if ! git remote get-url public >/dev/null 2>&1; then
+            git remote add public "https://github.com/${PUBLIC_REPO}.git"
           fi
 
-      - name: Sync default branch
+      - name: Sync private mirror branch with upstream
         run: |
-          git fetch upstream
-          git switch "${DEFAULT_BRANCH}"
-          git merge --ff-only "upstream/${DEFAULT_BRANCH}"
-          git push origin "${DEFAULT_BRANCH}"
+          set -euo pipefail
+
+          git fetch upstream "${PRIVATE_BASE_BRANCH}" --prune
+          git fetch origin "${PRIVATE_BASE_BRANCH}" --prune
+
+          ORIGIN_MAIN_SHA="$(git rev-parse "origin/${PRIVATE_BASE_BRANCH}")"
+          UPSTREAM_MAIN_SHA="$(git rev-parse "upstream/${PRIVATE_BASE_BRANCH}")"
+          echo "origin/${PRIVATE_BASE_BRANCH}:   ${ORIGIN_MAIN_SHA}"
+          echo "upstream/${PRIVATE_BASE_BRANCH}: ${UPSTREAM_MAIN_SHA}"
+
+          if [ "${ORIGIN_MAIN_SHA}" != "${UPSTREAM_MAIN_SHA}" ]; then
+            git checkout -B "${PRIVATE_BASE_BRANCH}" "upstream/${PRIVATE_BASE_BRANCH}"
+            git push --force-with-lease origin "${PRIVATE_BASE_BRANCH}:${PRIVATE_BASE_BRANCH}"
+          else
+            echo "Private mirror branch is already in sync"
+          fi
+
+      - name: Compute diff between private work branch and public main
+        id: diff
+        run: |
+          set -euo pipefail
+          git fetch origin "${PRIVATE_WORK_BRANCH}" --prune
+          git fetch public "${PUBLIC_BASE_BRANCH}" --prune
+
+          if git diff --quiet "public/${PUBLIC_BASE_BRANCH}" "origin/${PRIVATE_WORK_BRANCH}"; then
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+            echo "No diff to propose"
+          else
+            echo "has_diff=true" >> "$GITHUB_OUTPUT"
+            echo "Diff exists and PR will be prepared"
+          fi
+
+      - name: Verify cross-repo token
+        if: steps.diff.outputs.has_diff == 'true'
+        env:
+          PUBLIC_SYNC_TOKEN: ${{ secrets.PUBLIC_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PUBLIC_SYNC_TOKEN}" ]; then
+            echo "::error::Missing secret PUBLIC_SYNC_TOKEN (repo scope: contents/pull_requests on ${PUBLIC_REPO})"
+            exit 1
+          fi
+
+      - name: Push sync branch to public fork
+        if: steps.diff.outputs.has_diff == 'true'
+        env:
+          PUBLIC_SYNC_TOKEN: ${{ secrets.PUBLIC_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          git remote add public-auth "https://x-access-token:${PUBLIC_SYNC_TOKEN}@github.com/${PUBLIC_REPO}.git"
+          git checkout -B "${PUBLIC_PR_BRANCH}" "origin/${PRIVATE_WORK_BRANCH}"
+          git push --force public-auth "${PUBLIC_PR_BRANCH}:${PUBLIC_PR_BRANCH}"
+
+      - name: Create or update PR on public fork
+        if: steps.diff.outputs.has_diff == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          PR_NUMBER="$(gh pr list \
+            --repo "${PUBLIC_REPO}" \
+            --head "${PUBLIC_PR_BRANCH}" \
+            --base "${PUBLIC_BASE_BRANCH}" \
+            --json number \
+            --jq '.[0].number')"
+
+          if [ -n "${PR_NUMBER}" ]; then
+            gh pr edit "${PR_NUMBER}" \
+              --repo "${PUBLIC_REPO}" \
+              --title "sync: import private work/main changes" \
+              --body "Automated PR from private \`${PRIVATE_WORK_BRANCH}\` to public \`${PUBLIC_BASE_BRANCH}\`."
+            echo "Updated PR #${PR_NUMBER}"
+          else
+            gh pr create \
+              --repo "${PUBLIC_REPO}" \
+              --base "${PUBLIC_BASE_BRANCH}" \
+              --head "${PUBLIC_PR_BRANCH}" \
+              --title "sync: import private work/main changes" \
+              --body "Automated PR from private \`${PRIVATE_WORK_BRANCH}\` to public \`${PUBLIC_BASE_BRANCH}\`."
+          fi
