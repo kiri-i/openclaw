@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  workflows: write
 
 env:
   UPSTREAM: openclaw/openclaw
@@ -41,11 +40,24 @@ jobs:
             git remote add upstream "https://github.com/${UPSTREAM}.git"
           fi
 
+      - name: Verify sync token
+        env:
+          PUBLIC_FORK_SYNC_TOKEN: ${{ secrets.PUBLIC_FORK_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PUBLIC_FORK_SYNC_TOKEN}" ]; then
+            echo "::error::Missing secret PUBLIC_FORK_SYNC_TOKEN (repo/workflow write on ${GITHUB_REPOSITORY})"
+            exit 1
+          fi
+
       - name: Sync default branch (keep fork-specific workflow commits)
+        env:
+          PUBLIC_FORK_SYNC_TOKEN: ${{ secrets.PUBLIC_FORK_SYNC_TOKEN }}
         run: |
           set -euo pipefail
 
           git fetch upstream "${DEFAULT_BRANCH}" --prune
           git switch "${DEFAULT_BRANCH}"
           git merge --no-edit "upstream/${DEFAULT_BRANCH}"
-          git push origin "${DEFAULT_BRANCH}"
+          git remote add origin-auth "https://x-access-token:${PUBLIC_FORK_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin-auth "${DEFAULT_BRANCH}"
