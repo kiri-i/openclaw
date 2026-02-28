@@ -66,6 +66,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          git remote set-url origin "https://x-access-token:${PRIVATE_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git fetch upstream "${PRIVATE_BASE_BRANCH}" --prune
           git fetch origin "${PRIVATE_BASE_BRANCH}" --prune
 
