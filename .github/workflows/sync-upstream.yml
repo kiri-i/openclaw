@@ -13,8 +13,13 @@ env:
   UPSTREAM: openclaw/openclaw
   DEFAULT_BRANCH: main
 
+concurrency:
+  group: sync-upstream-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sync:
+    if: github.repository == 'kiri-i/openclaw'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout fork
@@ -35,9 +40,11 @@ jobs:
             git remote add upstream "https://github.com/${UPSTREAM}.git"
           fi
 
-      - name: Sync default branch
+      - name: Sync default branch (keep fork-specific workflow commits)
         run: |
-          git fetch upstream
+          set -euo pipefail
+
+          git fetch upstream "${DEFAULT_BRANCH}" --prune
           git switch "${DEFAULT_BRANCH}"
-          git merge --ff-only "upstream/${DEFAULT_BRANCH}"
+          git merge --no-edit "upstream/${DEFAULT_BRANCH}"
           git push origin "${DEFAULT_BRANCH}"
