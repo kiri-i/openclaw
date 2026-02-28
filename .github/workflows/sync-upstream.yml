@@ -32,6 +32,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: Configure git
         run: |
@@ -76,7 +77,7 @@ jobs:
           if [ "${ORIGIN_MAIN_SHA}" != "${UPSTREAM_MAIN_SHA}" ]; then
             git checkout -B "${PRIVATE_BASE_BRANCH}" "upstream/${PRIVATE_BASE_BRANCH}"
             git remote add origin-auth "https://x-access-token:${PRIVATE_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-            git push --force-with-lease origin-auth "${PRIVATE_BASE_BRANCH}:${PRIVATE_BASE_BRANCH}"
+            git push --force-with-lease="${PRIVATE_BASE_BRANCH}:${ORIGIN_MAIN_SHA}" origin-auth "${PRIVATE_BASE_BRANCH}:${PRIVATE_BASE_BRANCH}"
           else
             echo "Private mirror branch is already in sync"
           fi
