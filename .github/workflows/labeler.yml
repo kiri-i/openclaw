@@ -20,15 +20,7 @@ permissions: {}
 
 jobs:
   label:
-    if: |
-      github.event_name != 'pull_request_target' ||
-      (
-        !startsWith(github.event.pull_request.head.ref, 'sync/') &&
-        (
-          secrets.GH_APP_PRIVATE_KEY != '' ||
-          secrets.GH_APP_PRIVATE_KEY_FALLBACK != ''
-        )
-      )
+    if: github.event_name != 'pull_request_target' || !startsWith(github.event.pull_request.head.ref, 'sync/')
     permissions:
       contents: read
       pull-requests: write
